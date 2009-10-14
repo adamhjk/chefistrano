@@ -1,0 +1,7 @@
+= chefistrano
+
+Description goes here.
+
+== Copyright
+
+Copyright (c) 2009 Adam Jacob. See LICENSE for details.
