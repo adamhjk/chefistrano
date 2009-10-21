@@ -98,12 +98,12 @@ Capistrano::Configuration.instance.namespace(:chef) do
 
     Sample usage:
 
-      $ cap chef:run ROLES=webserver
-      $ cap chef:run ROLES=webserver,database
-      $ cap chef:run HOSTS=foo.bar.com 
+      $ cap chef:client ROLES=webserver
+      $ cap chef:client ROLES=webserver,database
+      $ cap chef:client HOSTS=foo.bar.com 
 
   DESC
-  task :run do
+  task :client do
     log_level = ENV["LOG_LEVEL"] ? ENV["LOG_LEVEL"] : "error"
     run("#{sudo} chef-client -l #{log_level}")
   end
