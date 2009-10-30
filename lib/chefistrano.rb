@@ -1,4 +1,5 @@
 require 'capistrano'
+require 'chef'
 require 'chef/recipe'
 require 'chef/node'
 require 'chef/role'
@@ -67,6 +68,12 @@ module Chefistrano
       end
       roles = node.run_list.roles
       roles << "all_chef"
+      recipes, default_attributes, override_attributes = node.run_list.expand
+      node.default = default_attributes
+      node.override = override_attributes
+      roles << { 
+        :app_environment => node.attribute?(:app_environment) ? node.app_environment : "none" 
+      }
       Capistrano::Configuration.instance.server server_fqdn, *roles
     end
   end
@@ -128,52 +135,70 @@ Capistrano::Configuration.instance.namespace(:chef) do
 
 end
 
-begin
-  Capistrano::Configuration.instance.chefistrano.search(:apps) do |app|
-    Capistrano::Configuration.instance.namespace(app['id']) do
+Capistrano::Configuration.instance.chefistrano.search(:apps) do |app|
+  Capistrano::Configuration.instance.namespace(app['id']) do
+    app['revision'].each do |app_env, rev|
+      namespace(app_env) do
+        namespace :deploy do
+          desc <<-DESC
+          Deploy #{app['id']} to #{app_env}.  This calls 'update'.  Supply the \
+          REVISION environment variable to specify the revison you want deployed.
 
-      app['server_roles'].each do |r|
-        if Capistrano::Configuration.instance.roles[r.to_sym].servers.length == 0
-          Chef::Log.warn("No nodes have the #{r} role; deployment of #{app['id']} may not work!")
-        end
-      end
+          Sample usage:
 
-      namespace :deploy do
-        desc <<-DESC
-        Deploy #{app['id']}.  This calls 'update'.  Supply the \
-        REVISION environment variable to specify the revison you want deployed.
+            $ cap #{app['id']}:deploy REVISION=1.5.2
+            $ cap #{app['id']}:deploy REVISION=1.5.34
 
-        Sample usage:
-
-          $ cap #{app['id']}:deploy REVISION=1.5.2
-          $ cap #{app['id']}:deploy REVISION=1.5.34
-
-        DESC
-        task :default do
-          if ENV['REVISION'] && app['revision'] != ENV['REVISION']
-            app['revision'] = ENV['REVISION']
-            app.save
+          DESC
+          task :default, :only => { :app_environment => app_env } do
+            if ENV['REVISION'] && app['revision'][app_env] != ENV['REVISION']
+              app['revision'][app_env] = ENV['REVISION']
+              app.save
+            end
+            update
           end
-          update
-        end
-        
-        task :update, :roles => app['server_roles'] do
-          log_level = ENV["LOG_LEVEL"] ? ENV["LOG_LEVEL"] : "error"
-          cmd = "#{sudo} chef-client -l #{log_level}"
-          tempfile = nil
-          if ENV['JSON']
-            tempfile = "/tmp/#{chefistrano.gen_temp_file_name}" 
-            upload(ENV['JSON'], tempfile) 
-            cmd << " -j #{ENV['JSON']}" 
+          
+          task :update, :roles => app['server_roles'], :only => { :app_environment => app_env } do
+            log_level = ENV["LOG_LEVEL"] ? ENV["LOG_LEVEL"] : "info"
+            cmd = "#{sudo} chef-client -l #{log_level}"
+            tempfile = nil
+            if ENV['JSON']
+              tempfile = "/tmp/#{chefistrano.gen_temp_file_name}" 
+              upload(ENV['JSON'], tempfile) 
+              cmd << " -j #{ENV['JSON']}" 
+            end
+            run(cmd)
+            run("#{sudo} rm #{tempfile}") if ENV['JSON']
           end
-          run(cmd)
-          run("#{sudo} rm #{tempfile}") if ENV['JSON']
+
+          desc <<-DESC
+            Copy files to the currently deployed version. This is useful for updating \
+            files piecemeal, such as when you need to quickly deploy only a single \
+            file. Some files, such as updated templates, images, or stylesheets, \
+            might not require a full deploy, and especially in emergency situations \
+            it can be handy to just push the updates to production, quickly.
+
+            To use this task, specify the files and directories you want to copy as a \
+            comma-delimited list in the FILES environment variable. All directories \
+            will be processed recursively, with all files being pushed to the \
+            deployment servers.
+
+              $ cap deploy:upload FILES=templates,controller.rb
+
+            Dir globs are also supported:
+
+            $ cap deploy:upload FILES='config/apache/*.conf'
+          DESC
+          task :upload, :except => { :no_release => true }, :only => { :app_environment => app_env } do
+            files = (ENV["FILES"] || "").split(",").map { |f| Dir[f.strip] }.flatten
+            abort "Please specify at least one file or directory to update (via the FILES environment variable)" if files.empty?
+
+            files.each { |file| top.upload(file, File.join(app["deploy_to"], "current", file)) }
+          end
+
         end
       end
     end
   end
-rescue
-  puts "No applications are configured, so no deploy tasks are present!"
-  puts $!.inspect
 end
 

@@ -1,11 +1,6 @@
-
 $: << File.join(File.dirname(__FILE__), "lib")
 require 'chefistrano'
 
-role :all, "localhost"
+set :ssh_options, {:forward_agent => true}
+set :user, "root"
 
-task :testing do
-  chef.recipe do
-    file "/tmp/wtf"
-  end
-end
