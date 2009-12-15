@@ -68,9 +68,6 @@ module Chefistrano
       end
       roles = node.run_list.roles
       roles << "all_chef"
-      recipes, default_attributes, override_attributes = node.run_list.expand
-      node.default = default_attributes
-      node.override = override_attributes
       roles << { 
         :app_environment => node.attribute?(:app_environment) ? node.app_environment : "none" 
       }
@@ -146,15 +143,28 @@ Capistrano::Configuration.instance.chefistrano.search(:apps) do |app|
 
           Sample usage:
 
-            $ cap #{app['id']}:deploy REVISION=1.5.2
-            $ cap #{app['id']}:deploy REVISION=1.5.34
+            $ cap #{app['id']}:#{app_env}:deploy REVISION=1.5.2
+            $ cap #{app['id']}:#{app_env}:deploy REVISION=1.5.34 FORCE=true
 
           DESC
           task :default, :only => { :app_environment => app_env } do
+            updated_app = false
             if ENV['REVISION'] && app['revision'][app_env] != ENV['REVISION']
               app['revision'][app_env] = ENV['REVISION']
-              app.save
+              updated_app = true
             end
+            if ENV['FORCE'] 
+              if app['force'][app_env] == false 
+                app['force'][app_env] = true 
+                updated_app = true
+              end
+            else
+              if app['force'][app_env] == true 
+                app['force'][app_env] = false
+                updated_app = true
+              end
+            end
+            app.save if updated_app
             update
           end
           
